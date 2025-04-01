@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Medical Consultant AI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#5D5CDE',
+                    }
+                }
+            },
+            darkMode: 'class'
+        }
+    </script>
+    <style>
+        .message-container {
+            max-height: calc(100vh - 200px);
+        }
+        /* Style for markdown content */
+        .markdown-content h1 { font-size: 1.8rem; font-weight: bold; margin-top: 1rem; margin-bottom: 0.5rem; }
+        .markdown-content h2 { font-size: 1.5rem; font-weight: bold; margin-top: 1rem; margin-bottom: 0.5rem; }
+        .markdown-content h3 { font-size: 1.3rem; font-weight: bold; margin-top: 1rem; margin-bottom: 0.5rem; }
+        .markdown-content p { margin-bottom: 0.75rem; }
+        .markdown-content ul, .markdown-content ol { margin-left: 1.5rem; margin-bottom: 0.75rem; }
+        .markdown-content ul { list-style-type: disc; }
+        .markdown-content ol { list-style-type: decimal; }
+        .markdown-content code { font-family: monospace; background-color: rgba(0, 0, 0, 0.1); padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
+        .markdown-content pre { background-color: rgba(0, 0, 0, 0.1); padding: 0.5rem; border-radius: 0.3rem; margin-bottom: 0.75rem; overflow-x: auto; }
+        .markdown-content pre code { background-color: transparent; padding: 0; }
+        .markdown-content blockquote { border-left: 3px solid #5D5CDE; padding-left: 1rem; margin-left: 0.5rem; margin-bottom: 0.75rem; font-style: italic; }
+        .dark .markdown-content code { background-color: rgba(255, 255, 255, 0.1); }
+        .dark .markdown-content pre { background-color: rgba(255, 255, 255, 0.1); }
+    </style>
+</head>
+<body class="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-200">
+    <div class="container mx-auto p-4 flex flex-col h-screen">
+        <header class="mb-4">
+            <h1 class="text-2xl font-bold text-primary">Medical Consultant AI</h1>
+            <p class="text-sm text-gray-600 dark:text-gray-400">Using DeepSeek Chat Model via OpenRouter with Knowledge Base</p>
+        </header>
+        
+        <div class="flex flex-col flex-grow">
+            <div class="mb-4">
+                <div class="flex items-center gap-2">
+                    <select id="conversationSelect" class="rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-2 flex-grow text-base">
+                        <option value="new">New Conversation</option>
+                    </select>
+                    <button id="newConversationBtn" class="bg-primary hover:bg-primary/90 text-white px-3 py-2 rounded-md">New</button>
+                    <button id="deleteConversationBtn" class="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-md">Delete</button>
+                </div>
+            </div>
+
+            <!-- File Upload Section -->
+            <div class="mb-4 p-4 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                <h2 class="text-lg font-semibold mb-2">Knowledge Base Management</h2>
+                <div class="flex items-center gap-2">
+                    <input type="file" id="fileInput" class="hidden" accept=".txt,.md,.json">
+                    <button id="uploadBtn" class="bg-green-500 hover:bg-green-600 text-white px-3 py-2 rounded-md">Upload File</button>
+                    <span id="uploadStatus" class="text-sm text-gray-600 dark:text-gray-400"></span>
+                </div>
+                <div id="fileList" class="mt-2 text-sm text-gray-600 dark:text-gray-400"></div>
+            </div>
+            
+            <div id="messagesContainer" class="flex-grow overflow-y-auto message-container bg-gray-100 dark:bg-gray-800 rounded-lg p-4 mb-4">
+                <div id="messagesList" class="space-y-4"></div>
+            </div>
+            
+            <div class="flex gap-2">
+                <input id="questionInput" type="text" placeholder="Type your message..." class="flex-grow rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 bg-white dark:bg-gray-800 text-base" autocomplete="off">
+                <button id="sendBtn" class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.classList.add('dark');
+        }
+        
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
+            if (event.matches) {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+        });
+
+        marked.setOptions({
+            renderer: new marked.Renderer(),
+            highlight: null,
+            pedantic: false,
+            gfm: true,
+            breaks: true,
+            sanitize: false,
+            smartypants: true,
+            xhtml: false
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const messagesContainer = document.getElementById('messagesContainer');
+            const messagesList = document.getElementById('messagesList');
+            const questionInput = document.getElementById('questionInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const conversationSelect = document.getElementById('conversationSelect');
+            const newConversationBtn = document.getElementById('newConversationBtn');
+            const deleteConversationBtn = document.getElementById('deleteConversationBtn');
+            const fileInput = document.getElementById('fileInput');
+            const uploadBtn = document.getElementById('uploadBtn');
+            const uploadStatus = document.getElementById('uploadStatus');
+            const fileList = document.getElementById('fileList');
+            
+            let conversations = {};
+            let currentConversationId = generateConversationId();
+            const MAX_MESSAGES = 10;
+            
+            createNewConversation();
+
+            // File upload functionality
+            uploadBtn.addEventListener('click', () => {
+                fileInput.click();
+            });
+
+            fileInput.addEventListener('change', async () => {
+                const file = fileInput.files[0];
+                if (!file) return;
+
+                const formData = new FormData();
+                formData.append('file', file);
+
+                try {
+                    uploadStatus.textContent = 'Uploading...';
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const data = await response.json();
+                    if (data.error) {
+                        uploadStatus.textContent = `Error: ${data.error}`;
+                    } else {
+                        uploadStatus.textContent = 'File uploaded successfully!';
+                        updateFileList();
+                    }
+                } catch (error) {
+                    uploadStatus.textContent = `Error: ${error.message}`;
+                }
+
+                fileInput.value = '';
+            });
+
+            async function updateFileList() {
+                try {
+                    const response = await fetch('/files');
+                    const data = await response.json();
+                    fileList.innerHTML = data.files.map(file => 
+                        `<div class="text-sm">${file}</div>`
+                    ).join('');
+                } catch (error) {
+                    fileList.innerHTML = `<div class="text-red-500">Error loading file list: ${error.message}</div>`;
+                }
+            }
+
+            // Initialize file list
+            updateFileList();
+
+            function createNewConversation() {
+                const id = generateConversationId();
+                const title = `Conversation ${Object.keys(conversations).length + 1}`;
+                conversations[id] = { title: title, messages: [] };
+                
+                const option = document.createElement('option');
+                option.value = id;
+                option.text = title;
+                conversationSelect.add(option);
+                
+                conversationSelect.value = id;
+                currentConversationId = id;
+                messagesList.innerHTML = '';
+            }
+
+            function generateConversationId() {
+                return Math.random().toString(36).substring(2, 12);
+            }
+
+            async function sendMessage() {
+                const question = questionInput.value.trim();
+                if (!question) return;
+                questionInput.value = '';
+
+                addMessageToUI('user', question);
+
+                if (!conversations[currentConversationId]) {
+                    createNewConversation();
+                }
+
+                conversations[currentConversationId].messages.push({
+                    role: 'user',
+                    content: question
+                });
+
+                // Limit number of messages
+                if (conversations[currentConversationId].messages.length > MAX_MESSAGES) {
+                    conversations[currentConversationId].messages.shift(); // Remove the oldest message
+                }
+
+                if (conversations[currentConversationId].messages.length === 1) {
+                    const truncatedTitle = question.length > 30 ? question.substring(0, 30) + '...' : question;
+                    conversations[currentConversationId].title = truncatedTitle;
+                    Array.from(conversationSelect.options).forEach(option => {
+                        if (option.value === currentConversationId) {
+                            option.text = truncatedTitle;
+                        }
+                    });
+                }
+
+                const loadingId = 'loading-' + Date.now();
+                addLoadingIndicator(loadingId);
+
+                try {
+                    const response = await fetch('/ask', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ conversation_id: currentConversationId, question: question, history: conversations[currentConversationId].messages }),
+                    });
+
+                    const data = await response.json();
+                    removeLoadingIndicator(loadingId);
+
+                    if (data.error) {
+                        addMessageToUI('error', data.error);
+                    } else {
+                        addMessageToUI('assistant', data.answer);
+                        conversations[currentConversationId].messages.push({ role: 'assistant', content: data.answer });
+                        
+                        // Limit number of messages for assistant responses
+                        if (conversations[currentConversationId].messages.length > MAX_MESSAGES) {
+                            conversations[currentConversationId].messages.shift(); // Remove the oldest message
+                        }
+                    }
+                } catch (error) {
+                    removeLoadingIndicator(loadingId);
+                    addMessageToUI('error', 'Failed to communicate with the server: ' + error.message);
+                }
+            }
+
+            function addMessageToUI(role, content) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `p-3 rounded-lg ${role === 'user' ? 'bg-primary/10 ml-12' : role === 'error' ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200' : 'bg-gray-200 dark:bg-gray-700 mr-12'}`;
+                const label = document.createElement('div');
+                label.className = 'font-semibold mb-1';
+                label.textContent = role === 'user' ? 'You' : role === 'error' ? 'Error' : 'Assistant';
+                const message = document.createElement('div');
+
+                if (role === 'assistant') {
+                    message.className = 'markdown-content';
+                    message.innerHTML = marked.parse(content);
+                } else {
+                    message.className = 'whitespace-pre-wrap';
+                    message.textContent = content;
+                }
+
+                messageDiv.appendChild(label);
+                messageDiv.appendChild(message);
+                messagesList.appendChild(messageDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+
+            function addLoadingIndicator(id) {
+                const loadingDiv = document.createElement('div');
+                loadingDiv.id = id;
+                loadingDiv.className = 'p-3 rounded-lg bg-gray-200 dark:bg-gray-700 mr-12 flex items-center';
+                const label = document.createElement('div');
+                label.className = 'font-semibold mr-2';
+                label.textContent = 'Assistant';
+                const dotsContainer = document.createElement('div');
+                dotsContainer.className = 'flex space-x-1';
+
+                for (let i = 0; i < 3; i++) {
+                    const dot = document.createElement('div');
+                    dot.className = 'w-2 h-2 bg-gray-500 dark:bg-gray-400 rounded-full animate-pulse';
+                    dot.style.animationDelay = `${i * 0.15}s`;
+                    dotsContainer.appendChild(dot);
+                }
+
+                loadingDiv.appendChild(label);
+                loadingDiv.appendChild(dotsContainer);
+                messagesList.appendChild(loadingDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+
+            function removeLoadingIndicator(id) {
+                const loadingDiv = document.getElementById(id);
+                if (loadingDiv) {
+                    loadingDiv.remove();
+                }
+            }
+
+            sendBtn.addEventListener('click', sendMessage);
+            questionInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    sendMessage();
+                }
+            });
+
+            newConversationBtn.addEventListener('click', () => {
+                createNewConversation();
+            });
+
+            deleteConversationBtn.addEventListener('click', () => {
+                if (currentConversationId && Object.keys(conversations).length > 1) {
+                    delete conversations[currentConversationId];
+                    Array.from(conversationSelect.options).forEach(option => {
+                        if (option.value === currentConversationId) {
+                            conversationSelect.removeChild(option);
+                        }
+                    });
+                    if (conversationSelect.options.length > 1) {
+                        conversationSelect.selectedIndex = 1;
+                        currentConversationId = conversationSelect.value;
+                        loadConversation(currentConversationId);
+                    } else {
+                        createNewConversation();
+                    }
+                } else if (Object.keys(conversations).length <= 1) {
+                    createNewConversation();
+                }
+            });
+
+            conversationSelect.addEventListener('change', (e) => {
+                const selectedId = e.target.value;
+                if (selectedId === 'new') {
+                    createNewConversation();
+                } else {
+                    currentConversationId = selectedId;
+                    loadConversation(selectedId);
+                }
+            });
+
+            function loadConversation(conversationId) {
+                messagesList.innerHTML = '';
+                if (conversations[conversationId]) {
+                    conversations[conversationId].messages.forEach(msg => {
+                        addMessageToUI(msg.role, msg.content);
+                    });
+                }
+            }
+        });
+    </script>
+</body>
+</html>
